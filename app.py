@@ -52,6 +52,7 @@ def create_map(
                 title="CO2 Emissions<br>(tons)", x=1.02, thickness=25, len=0.8
             ),
             text=gdf["AAN_ID"],
+            # Hover information for a parcel via customdata
             customdata=list(
                 zip(
                     gdf["SUM_CO2_totaal"],
@@ -74,7 +75,8 @@ def create_map(
                 "Current CO₂: %{customdata[1]:,.0f} t<br>"
                 "<extra></extra>"
             ),
-            selectedpoints=selected_ids if selected_ids else None,
+             # Force empty list when nothing selected
+            selectedpoints=selected_ids if selected_ids else None, 
         )
     )
 
@@ -143,18 +145,21 @@ def create_map(
 
 
 # -------------------------------------------------------------------
-# Effective CO2 calculation
+# Effective CO2 calculation based on summer drainage, winter drainage and infiltration parameters
 # -------------------------------------------------------------------
+
 def compute_effective_co2(gdf, parcel_modifications, scenarios_indexed):
     effective_co2 = gdf["SUM_CO2_totaal"].copy()
 
+    # Iterate over parcels and extract modification parameters for this parcel
     for idx, mod in parcel_modifications.items():
         summer = mod["summer"]
         infiltration = mod["infiltration"]
 
         if summer == 0:
             continue
-
+        
+        # Select the current parcel by its row index and retrieve its attributes
         row = gdf.iloc[idx]
         aan_id = row["AAN_ID"]
         baseline_summer = row["FIRST_zomerdrooglegging"]
@@ -166,13 +171,13 @@ def compute_effective_co2(gdf, parcel_modifications, scenarios_indexed):
         )  # Round to avoid floating-point issues
 
         try:
-            # OPTIMIZED: O(1) index lookup instead of O(n) filtering
+            # Lookup precomputed CO2 for parcel & scenario
             co2_value = scenarios_indexed.loc[
                 (aan_id, target_summer, baseline_winter, infiltration), "CO2_parcel"
             ]
             effective_co2.iloc[idx] = co2_value
         except KeyError:
-            # No matching scenario found - keep baseline
+            # No matching scenario: retain baseline CO2
             logging.debug(
                 f"No scenario match for parcel {aan_id}: "
                 f"summer={target_summer}, winter={baseline_winter}, infiltration={infiltration}"
@@ -184,26 +189,32 @@ def compute_effective_co2(gdf, parcel_modifications, scenarios_indexed):
 # -------------------------------------------------------------------
 # App factory
 # -------------------------------------------------------------------
+
 def create_app(gdf, geojson, scenarios_df, wmu_geojson):
+    # Map AAN_ID to row index for quick lookup
     aan_id_to_idx = {aan_id: idx for idx, aan_id in enumerate(gdf["AAN_ID"])}
 
+    # Group parcel indices by water management unit
     wmu_to_parcels = gdf.groupby("Code_1").apply(lambda x: x.index.tolist()).to_dict()
 
+    # Map each row index to its water management unit
     idx_to_wmu = gdf["Code_1"].to_dict()
 
     scenarios_df["zomerdrooglegging"] = scenarios_df["zomerdrooglegging"].round(6)
     scenarios_df["winterdrooglegging"] = scenarios_df["winterdrooglegging"].round(6)
 
+    # Create multi-level index for fast scenario lookup by parcel and parameters
     scenarios_indexed = scenarios_df.set_index(
         ["AAN_ID", "zomerdrooglegging", "winterdrooglegging", "infiltratiemaatregel"]
     ).sort_index()
 
+     # Initialize Dash application
     app = dash.Dash(__name__, external_stylesheets=["assets/styles.css"])
     app.title = "Groningen Peat CO2 Dashboard"
 
     app.layout = html.Div(
         [
-            # Header section
+            # Header section: title and short instructions
             html.Div(
                 [
                     html.H1(
@@ -217,7 +228,7 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                 ],
                 className="header-container",
             ),
-            # Total Emissions Summary
+            # Total Emissions Summary, displays aggregated current, effective, and reduced CO2 values
             html.Div(
                 [
                     html.Div(
@@ -251,10 +262,10 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                 ],
                 className="emissions-summary",
             ),
-            # Main content area
+            # Main content area: map (left) and controls (right)
             html.Div(
                 [
-                    # Left panel - Map
+                    # Left panel - interactive Map
                     html.Div(
                         [
                             dcc.Loading(
@@ -264,6 +275,7 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                                     dcc.Graph(
                                         id="map",
                                         className="map-container",
+                                        # Add selection tools to the mode bar
                                         config={
                                             "scrollZoom": True,
                                             "modeBarButtonsToAdd": [
@@ -285,15 +297,17 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                         ],
                         className="map-panel",
                     ),
-                    # Right side - Controls
+                    # Right side - User Controls
                     html.Div(
-                        [
+                        [   
+                            # Dropdown for selecting water level increase
                             html.Label("Raise water level by:"),
                             dcc.Dropdown(
                                 id="summer-selector",
                                 clearable=False,
                                 placeholder="Select delta",
                             ),
+                            # Dropdown for selecting infiltration measure
                             html.Label("Select infiltration type:"),
                             dcc.Dropdown(
                                 id="infiltration-select",
@@ -308,6 +322,7 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                                 value="ref",
                                 clearable=False,
                             ),
+                            # Action buttons: apply or reset parcel modifications
                             html.Div(
                                 id="button-container",
                                 children=[
@@ -325,7 +340,7 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                                     ),
                                 ],
                             ),
-                            # Selection statistics
+                            # Selection statistics panel, shows stats for currently selected parcels
                             html.Div(
                                 [
                                     html.H3("Current Selection"),
@@ -362,7 +377,7 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                                 ],
                                 className="selection-stats",
                             ),
-                            # Modified parcels list
+                            # List of parcels that have modifications applied
                             html.Div(
                                 [
                                     html.H3("Modified Parcels"),
@@ -379,16 +394,19 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                 ],
                 className="container",
             ),
-            # Hidden stores
+            # Hidden client-side stores for application state
             dcc.Store(id="selected-parcels", data=[]),
             dcc.Store(id="parcel-modifications", data={}),
             dcc.Store(id="highlight-parcels", data=[]),
         ]
     )
 
+
     # -------------------------------------------------------------------
-    # Callback 1: OPTIMIZED Selection handling
+    # Callback 1: 
+    # Handles all parcel selection logic (Single-click selections, Box / lasso selection, Clear selection button)
     # -------------------------------------------------------------------
+
     @app.callback(
         Output("selected-parcels", "data"),
         Output("highlight-parcels", "data"),
@@ -414,27 +432,28 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
         if highlight_ids is None:
             highlight_ids = []
 
+        # Only react when something actually triggered the callback
         if ctx.triggered:
             trigger = ctx.triggered[0]["prop_id"]
 
+            # Clear button: reset all selection and highlights
             if trigger == "clear-btn.n_clicks":
                 return [], [], None, None
 
+            # Single click on a parcel, it expands selection to the entire management unit
             elif trigger == "map.clickData" and clickData is not None:
                 aan_id = clickData["points"][0]["location"]
 
-                # OPTIMIZED: O(1) lookup instead of O(n) search
+                # Optimized lookup, now O(1) for all tables
                 idx = aan_id_to_idx.get(aan_id)
                 if idx is None:
                     return selected_ids, highlight_ids, None, None
-
-                # OPTIMIZED: O(1) lookup for WMU code
                 wm_unit = idx_to_wmu[idx]
-
-                # OPTIMIZED: O(1) lookup for all parcels in unit
                 same_unit_indices = wmu_to_parcels[wm_unit]
 
-                # Toggle logic
+                # Toggle logic:
+                # If entire unit is already selected, deselect it
+                # Otherwise, add entire unit to selection
                 if set(same_unit_indices).issubset(set(selected_ids)):
                     selected_ids = [
                         i for i in selected_ids if i not in same_unit_indices
@@ -444,14 +463,16 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                     selected_ids = list(set(selected_ids).union(same_unit_indices))
                     highlight_ids = [i for i in same_unit_indices if i != idx]
 
+            # Box / lasso selection, it expands selection to full management units for all parcels
             elif trigger == "map.selectedData" and selectedData is not None:
                 selected_aan_ids = [p["location"] for p in selectedData["points"]]
 
+                # Use sets to avoid duplicate indices
                 selected_idx_set = set()
                 highlight_idx_set = set()
 
                 for aan_id in selected_aan_ids:
-                    # OPTIMIZED: O(1) lookups
+                    # Optimized lookups, now O(1)
                     idx = aan_id_to_idx.get(aan_id)
                     if idx is None:
                         continue
@@ -467,9 +488,13 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
 
         return selected_ids, highlight_ids, None, None
 
+
     # -------------------------------------------------------------------
-    # Callback 2: Modifications handling
+    # Callback 2: 
+    # Handles applying and resetting parcel modifications 
+    # (Apply button assigns summer/infiltration settings to all selected parcels, Reset button removes all modifications)
     # -------------------------------------------------------------------
+
     @app.callback(
         [
             Output("parcel-modifications", "data"),
@@ -503,6 +528,7 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
         if selected_ids is None:
             selected_ids = []
 
+        # JSON stores keys as strings → convert back to integers
         parcel_mods = {int(k): v for k, v in parcel_mods.items()}
 
         highlight_ids = []
@@ -510,15 +536,18 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
         if ctx.triggered:
             trigger = ctx.triggered[0]["prop_id"]
 
+            # Apply modifications to all currently selected parcels
             if trigger == "apply-btn.n_clicks" and selected_ids:
                 for idx in selected_ids:
                     parcel_mods[idx] = {
                         "summer": summer_val,
                         "infiltration": infiltration_val,
                     }
+                # Clear selection and highlights after applying
                 selected_ids = []
                 highlight_ids = []
 
+            # Reset all parcel modifications
             elif trigger == "reset-modifications-btn.n_clicks":
                 parcel_mods = {}
                 selected_ids = []
@@ -526,9 +555,12 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
 
         return parcel_mods, selected_ids, highlight_ids
 
+
     # -------------------------------------------------------------------
-    # Callback 3: Summer selector update
-    # -------------------------------------------------------------------
+    # Callback 3: 
+    # Updates the summer water-level selector based on the current selection.
+    # ------------------------------------------------------------------- 
+
     @app.callback(
         Output("summer-selector", "options"),
         Output("summer-selector", "value"),
@@ -538,22 +570,30 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
         if not selected_ids:
             return [{"label": "0.0 m", "value": 0.0}], 0.0
 
+        # Determine the minimum baseline summer drainage across all selected parcels
         min_summer = gdf.iloc[selected_ids]["FIRST_zomerdrooglegging"].dropna().min()
 
+        # Drainage cannot go below 0.2
         max_delta = max(min_summer - 0.2, 0)
 
+        # If no reduction is possible, lock selector to 0.0 m
         if max_delta <= 0:
             return [{"label": "0.0 m", "value": 0.0}], 0.0
-
+        
+        # Generate allowed delta values: Start at 0.0, Step by 0.1 m, Round to avoid floating-point errors
         values = np.round(np.arange(0.0, max_delta + 0.01, 0.1), 1)
 
+        # Convert numeric values into dropdown options
         options = [{"label": f"{v:.1f} m", "value": float(v)} for v in values]
 
         return options, options[0]["value"]
 
+
     # -------------------------------------------------------------------
-    # Callback 4: Update display (map + statistics)
-    # -------------------------------------------------------------------
+    # Callback 4: 
+    # Updates the entire dashboard display whenever selection, modifications, or scenario inputs change.
+    # -------------------------------------------------------------------   
+
     @app.callback(
         [
             Output("map", "figure"),
@@ -583,10 +623,13 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
         if parcel_mods is None:
             parcel_mods = {}
 
+        # JSON stores keys as strings, convert back to integers
         parcel_mods = {int(k): v for k, v in parcel_mods.items()}
 
+        # Compute effective CO2 for new parameters
         effective_co2 = compute_effective_co2(gdf, parcel_mods, scenarios_indexed)
 
+        # Create map
         fig = create_map(
             gdf,
             geojson,
@@ -597,6 +640,7 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
             highlight_ids,
         )
 
+        # Total
         total_current = gdf["SUM_CO2_totaal"].sum()
         total_effective = effective_co2.sum()
         total_reduction_amount = total_current - total_effective
@@ -604,11 +648,13 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
             (total_reduction_amount / total_current * 100) if total_current > 0 else 0
         )
 
+        # Selection stats
         if selected_ids:
             sel = gdf.iloc[selected_ids]
             count = len(sel)
             selection_current = sel["SUM_CO2_totaal"].sum()
 
+            # Compute CO2 if selected water level + infiltration parameters are applied
             selection_scenario = compute_effective_co2(
                 sel,
                 {
@@ -617,8 +663,9 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                 },
                 scenarios_indexed,
             ).sum()
-
+        
             selection_current_text = f"{selection_current:,.0f} tons"
+            # Include reduction percentage if current CO2 > 0
             if selection_current > 0:
                 reduction_pct = (
                     (selection_current - selection_scenario) / selection_current * 100
@@ -630,10 +677,12 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                 selection_scenario_text = f"{selection_scenario:,.0f} tons"
 
         else:
+            # No parcels selected, display placeholder messages
             count = 0
             selection_current_text = "No parcels selected"
             selection_scenario_text = "No parcels selected"
 
+        # Build modified parcel list for display: shows parcel ID, modification status, and before/after CO2
         if parcel_mods:
             modified_list = [
                 html.Div(
@@ -658,6 +707,7 @@ def create_app(gdf, geojson, scenarios_df, wmu_geojson):
                 for idx in parcel_mods.keys()
             ]
         else:
+            # Placeholder message when no modifications have been applied
             modified_list = [
                 html.P(
                     "No modifications applied yet",
@@ -686,10 +736,12 @@ def main():
     setup_logging()
     logging.info("Starting Dash application")
 
+    # Read parcels dataset with baseline parameters
     gdf = gpd.read_file("data/dashboard_Data.gpkg", layer="main")
     gdf = ensure_wgs84(gdf)
     geojson = create_geojson(gdf)
 
+    # Convert columns to numeric
     gdf["SUM_CO2_totaal"] = (
         pd.to_numeric(gdf["SUM_CO2_totaal"], errors="coerce") / 1000.0
     )
@@ -700,12 +752,15 @@ def main():
         pd.to_numeric(gdf["FIRST_Oppervlakte__m2_"], errors="coerce") / 1000.0
     )
 
+     # Read Water Management Units shapefile
     wmu_gdf = gpd.read_file("data/dashboard_Data.gpkg", layer="waterManagementUnits")
     wmu_gdf = ensure_wgs84(wmu_gdf)
     wmu_geojson = json.loads(wmu_gdf.to_json())
 
+    # Read CO2 emission scenario file
     scenarios_df = pd.read_csv("data/parcel_co2_scenarios.csv", sep=";", decimal=",")
 
+    # Convert columns to numeric
     scenarios_df["CO2_parcel"] = (
         pd.to_numeric(scenarios_df["CO2_parcel"], errors="coerce") / 1000
     )
@@ -716,6 +771,7 @@ def main():
         scenarios_df["winterdrooglegging"], errors="coerce"
     )
 
+    # Start the application
     app = create_app(gdf, geojson, scenarios_df, wmu_geojson)
     app.run(debug=True, host="0.0.0.0", port=8050)
 
