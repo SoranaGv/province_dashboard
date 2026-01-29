@@ -61,3 +61,8 @@ Thumbs.db
 # Dash build / cache
 # -------------------------
 .cache/
+
+# -------------------------
+# Allow tracked data in /data
+# -------------------------
+!data.zip
