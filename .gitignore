@@ -1,0 +1,63 @@
+# -------------------------
+# Python bytecode & caches
+# -------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+
+# -------------------------
+# Virtual environments
+# -------------------------
+venv/
+.env/
+.env*/
+.virtualenv/
+.venv/
+
+# -------------------------
+# Dash / Flask artifacts
+# -------------------------
+*.log
+
+# -------------------------
+# OS / Editor files
+# -------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# -------------------------
+# Jupyter / IPython
+# -------------------------
+.ipynb_checkpoints/
+
+# -------------------------
+# Geo / data artifacts
+# -------------------------
+*.gpkg
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.geojson
+*.tif
+*.tiff
+
+# -------------------------
+# Generated outputs
+# -------------------------
+*.csv
+*.parquet
+*.feather
+*.pickle
+*.pkl
+
+
+# -------------------------
+# Dash build / cache
+# -------------------------
+.cache/
