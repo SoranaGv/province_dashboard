@@ -23,12 +23,15 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-5. Run the application:
+5. Unzip the data.zip file into a folder named `data`
+
+
+6. Run the application:
 ```ruby
 python app.py
 ```
 
-6. Open the dashboard in your browser:
+7. Open the dashboard in your browser:
 http://127.0.0.1:8050/
 
 The dashboard will run locally on your machine.
